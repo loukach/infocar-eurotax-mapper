@@ -1,0 +1,17 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.vscode/
+.idea/
+*.swp
+*.swo
+analysis/
+experiments/
+benchmark/
+data/
+*.md
+!requirements.txt
+.git/
+.gitignore
+.dockerignore

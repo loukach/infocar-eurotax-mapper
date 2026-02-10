@@ -1,0 +1,28 @@
+# Environment variables (contains credentials)
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data directory (legacy - uses MongoDB now)
+data/*.json
+data/*.csv
+
+# Benchmark outputs
+benchmark/*.csv
+
+# Analysis outputs
+analysis/
