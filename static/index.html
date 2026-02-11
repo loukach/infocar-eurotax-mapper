@@ -1329,6 +1329,8 @@
                         source_code: currentData.infocar_provider_code,
                         dest_code: natcode,
                         score: score,
+                        profile: document.getElementById('profileSelect').value,
+                        vehicle_class: currentData.vehicle_class || 'CAR',
                         country: 'it'
                     })
                 });

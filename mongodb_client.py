@@ -108,37 +108,6 @@ def fetch_eurotax_trims(country: str = "it") -> List[Dict]:
     return results
 
 
-def get_existing_mapping(source_code: str, source_provider: str = "infocar", dest_provider: str = "eurotax") -> Optional[Dict]:
-    """
-    Check if a mapping already exists for the given source code.
-
-    Args:
-        source_code: The provider code to check
-        source_provider: Source provider (default: "infocar")
-        dest_provider: Destination provider (default: "eurotax")
-
-    Returns:
-        Mapping document if found, None otherwise
-    """
-    if not MONGO_URI:
-        return None
-
-    try:
-        client = get_mongo_client()
-        db = client['x_catalogue']
-        collection = db['mappings']
-
-        mapping = collection.find_one({
-            'sourceCode': source_code,
-            'sourceProvider': source_provider,
-            'destProvider': dest_provider
-        })
-
-        return mapping
-    except Exception as e:
-        print(f"Error checking existing mapping: {e}")
-        return None
-
 
 def test_connection() -> Dict:
     """

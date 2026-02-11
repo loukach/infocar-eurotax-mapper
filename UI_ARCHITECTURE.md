@@ -41,7 +41,7 @@ The UI depends on the following structure from `/api/search`:
 | `stage2_decision` | string | Confidence label: PERFECT/LIKELY/POSSIBLE/UNLIKELY |
 | `stage2_confidence` | float | Score as fraction of max (0-1) |
 | `stage2_recommended_natcode` | string | Top candidate's natcode |
-| `existing_mapping` | object/null | Previously mapped natcode if any |
+| `existing_mapping` | object/null | Most recent mapping from X-Catalog API (real-time via `/v1/private/mapping/infocar/{code}`) |
 | `weight_profile` | string | Active profile name |
 | `max_score` | int | Max possible score for this profile |
 

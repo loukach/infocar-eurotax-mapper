@@ -22,7 +22,7 @@ desktop-app-v4/
 +-- matcher_v4.py        # Matching algorithm (Stage 1 + Stage 2)
 +-- normalizers.py       # Fuel, body, transmission, traction, model normalization (100% coverage both sources)
 +-- vehicle_class.py     # CAR vs LCV classification (includes BUS as LCV body type)
-+-- mongodb_client.py    # MongoDB connection (x_catalogue database)
++-- mongodb_client.py    # MongoDB connection (Eurotax trims from x_catalogue)
 +-- static/              # Frontend UI (thin display layer, no business logic)
 +-- Dockerfile           # Container build for k8s deployment
 +-- .env.example         # Credential template for new engineers
@@ -156,8 +156,9 @@ The `clean_oem_code()` function applies brand-specific transformations (unchange
 
 ## Data Sources
 
-| Source | Collection | Purpose |
-|--------|------------|---------|
-| MongoDB x_catalogue.trims | Eurotax catalog | Target vehicle database |
-| MongoDB x_catalogue.mappings | Existing mappings | Ground truth for validation |
-| X-Catalog API | Infocar data | Source vehicle lookup |
+| Operation | Source | Endpoint |
+|-----------|--------|----------|
+| Load Eurotax versions | MongoDB | `x_catalogue.trims` collection (aggregation pipeline, loaded on startup, refreshed hourly) |
+| Fetch Infocar version details | X-Catalog API | `PUT /trim/search` with `source: "infocar"` |
+| Fetch existing mappings | X-Catalog API | `GET /v1/private/mapping/infocar/{code}?country=it&vehicleType={car\|lcv}` (real-time, picks most recent by ObjectId) |
+| Create new mapping | X-Catalog API | `POST /v1/private/mapping` (score normalized 0-1, strategy lowercase, vehicleType from vehicle class) |

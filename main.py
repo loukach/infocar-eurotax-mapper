@@ -30,7 +30,7 @@ from matcher_v4 import (
 )
 from normalizers import normalize_body, normalize_model, normalize_fuel, normalize_transmission, normalize_traction
 from vehicle_class import identify_vehicle_class
-from mongodb_client import fetch_eurotax_trims, test_connection, get_existing_mapping
+from mongodb_client import fetch_eurotax_trims, test_connection
 
 
 # ============================================================================
@@ -147,12 +147,49 @@ def fetch_infocar_from_xcatalog(provider_code: str, country: str = "it") -> Opti
         return None
 
 
+def fetch_existing_mapping(source_code: str, vehicle_type: str, country: str = "it") -> Optional['ExistingMapping']:
+    """Fetch the most recent existing mapping from X-Catalog API."""
+    url = f"{X_CATALOG_BASE_URL}/v1/private/mapping/infocar/{source_code}"
+    params = {"country": country, "vehicleType": vehicle_type}
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+    }
+
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        response.raise_for_status()
+        mappings = response.json()
+
+        if not mappings or not isinstance(mappings, list):
+            return None
+
+        # Filter to eurotax mappings and pick the most recent by createdAt
+        eurotax = [m for m in mappings if m.get('destProvider') == 'eurotax']
+        if not eurotax:
+            return None
+
+        # Pick most recent: use id (MongoDB ObjectId, encodes timestamp) since API doesn't return createdAt
+        latest = max(eurotax, key=lambda m: m.get('id') or '')
+        return ExistingMapping(
+            dest_code=str(latest.get('destCode', '')),
+            dest_provider=latest.get('destProvider', ''),
+            score=latest.get('score'),
+            strategy=latest.get('strategy'),
+            created_at=None
+        )
+    except requests.exceptions.RequestException as e:
+        print(f"Existing mapping lookup error: {e}")
+        return None
+
+
 def submit_mapping_to_xcatalog(
     source_code: str,
     dest_code: str,
     score: int,
+    max_score: int,
+    vehicle_class: str,
     country: str = "it",
-    vehicle_type: str = "auto"
 ) -> Dict[str, Any]:
     """Submit a mapping to X-Catalog API."""
     url = f"{X_CATALOG_BASE_URL}/v1/private/mapping"
@@ -161,54 +198,21 @@ def submit_mapping_to_xcatalog(
         "Accept": "application/json",
         "Content-Type": "application/json"
     }
+    normalized_score = round(score / max_score, 4) if max_score > 0 else 0
+    vehicle_type = "lcv" if vehicle_class == "LCV" else "car"
     payload = {
         "country": country,
         "destCode": dest_code,
         "destProvider": "eurotax",
-        "score": score,
+        "score": normalized_score,
         "sourceCode": source_code,
         "sourceProvider": "infocar",
-        "strategy": "MANUAL",
+        "strategy": "manual",
         "vehicleType": vehicle_type
     }
 
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        return {"success": True, "data": response.json() if response.text else {}}
-    except requests.exceptions.RequestException as e:
-        return {"success": False, "error": str(e)}
-
-
-def update_mapping_in_xcatalog(
-    mapping_id: str,
-    source_code: str,
-    dest_code: str,
-    score: int,
-    country: str = "it",
-    vehicle_type: str = "auto"
-) -> Dict[str, Any]:
-    """Update an existing mapping in X-Catalog API."""
-    url = f"{X_CATALOG_BASE_URL}/v1/private/mapping/{mapping_id}"
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "id": mapping_id,
-        "country": country,
-        "destCode": dest_code,
-        "destProvider": "eurotax",
-        "score": score,
-        "sourceCode": source_code,
-        "sourceProvider": "infocar",
-        "strategy": "MANUAL",
-        "vehicleType": vehicle_type
-    }
-
-    try:
-        response = requests.put(url, json=payload, headers=headers, timeout=30)
         response.raise_for_status()
         return {"success": True, "data": response.json() if response.text else {}}
     except requests.exceptions.RequestException as e:
@@ -309,7 +313,6 @@ app.add_middleware(
 
 
 class ExistingMapping(BaseModel):
-    mapping_id: Optional[str] = None  # MongoDB _id for updates
     dest_code: str
     dest_provider: str
     score: Optional[float] = None
@@ -343,6 +346,8 @@ class MappingRequest(BaseModel):
     source_code: str
     dest_code: str
     score: int
+    profile: str = DEFAULT_PROFILE
+    vehicle_class: str = "CAR"
     country: str = "it"
 
 
@@ -467,38 +472,9 @@ async def search(
     body_type = normalize_body(infocar_rec.get('bodyType', ''))
     vehicle_class = identify_vehicle_class(brand, model, body_type)
 
-    # Extract existing mapping if present (from API response)
-    existing_mapping = None
-    mappings = infocar_rec.get('mappings', [])
-    if mappings:
-        for m in mappings:
-            if m.get('destProvider') == 'eurotax':
-                existing_mapping = ExistingMapping(
-                    dest_code=m.get('destCode', ''),
-                    dest_provider=m.get('destProvider', ''),
-                    score=m.get('score'),
-                    strategy=m.get('strategy'),
-                    created_at=m.get('createdAt')
-                )
-                break
-
-    # If no mapping from API, check MongoDB mappings collection directly
-    if not existing_mapping:
-        mongo_mapping = get_existing_mapping(used_code)
-        if mongo_mapping:
-            created_at = mongo_mapping.get('createdAt')
-            if created_at:
-                created_at = created_at.isoformat() if hasattr(created_at, 'isoformat') else str(created_at)
-            # Extract MongoDB _id as string
-            mapping_id = str(mongo_mapping.get('_id', '')) if mongo_mapping.get('_id') else None
-            existing_mapping = ExistingMapping(
-                mapping_id=mapping_id,
-                dest_code=str(mongo_mapping.get('destCode', '')),
-                dest_provider=mongo_mapping.get('destProvider', ''),
-                score=mongo_mapping.get('score'),
-                strategy=mongo_mapping.get('strategy'),
-                created_at=created_at
-            )
+    # Get existing mapping via X-Catalog API (most recent)
+    vehicle_type = "lcv" if vehicle_class == "LCV" else "car"
+    existing_mapping = fetch_existing_mapping(used_code, vehicle_type)
 
     # V4 MATCHING: Stage 1 - Make+Model candidates (no OEM gating)
     candidate_records = matcher.find_candidates(brand, model, vehicle_class)
@@ -569,25 +545,14 @@ async def search(
 @app.post("/api/mapping")
 async def create_mapping(request: MappingRequest):
     """Submit a new mapping to X-Catalog."""
+    weights = WEIGHT_PROFILES.get(request.profile, WEIGHT_PROFILES[DEFAULT_PROFILE])
+    max_score = get_max_score(weights)
     result = submit_mapping_to_xcatalog(
         source_code=request.source_code,
         dest_code=request.dest_code,
         score=request.score,
-        country=request.country
-    )
-    if not result["success"]:
-        raise HTTPException(status_code=500, detail=result["error"])
-    return result
-
-
-@app.put("/api/mapping/{mapping_id}")
-async def update_mapping(mapping_id: str, request: MappingRequest):
-    """Update an existing mapping in X-Catalog."""
-    result = update_mapping_in_xcatalog(
-        mapping_id=mapping_id,
-        source_code=request.source_code,
-        dest_code=request.dest_code,
-        score=request.score,
+        max_score=max_score,
+        vehicle_class=request.vehicle_class,
         country=request.country
     )
     if not result["success"]:

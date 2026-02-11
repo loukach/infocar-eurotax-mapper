@@ -63,8 +63,16 @@ In v3, if the wrong variant (e.g., Opel Corsa 3-door) shared an OEM code with th
 
 | Service | Host | Port | Purpose |
 |---------|------|------|---------|
-| MongoDB | mongodb-0.stockspark.app | 443 | Eurotax data + mappings |
-| X-Catalog API | x-catalogue.motork.io | 443 | Infocar data + mapping submission |
+| MongoDB | mongodb-0.stockspark.app | 443 | Eurotax version catalog (`x_catalogue.trims`) |
+| X-Catalog API | x-catalogue.motork.io | 443 | Infocar data, existing mappings, mapping submission |
+
+### External API Endpoints (X-Catalog)
+
+| Operation | Method | Endpoint | Notes |
+|-----------|--------|----------|-------|
+| Fetch Infocar version | PUT | `/trim/search` | `source: "infocar"`, returns vehicle details + stale mappings array |
+| Fetch existing mappings | GET | `/v1/private/mapping/infocar/{code}?country=it&vehicleType={car\|lcv}` | Real-time, most recent picked by ObjectId |
+| Create mapping | POST | `/v1/private/mapping` | Score normalized 0-1, strategy lowercase, vehicleType from vehicle class |
 
 ### Python Dependencies
 
@@ -218,11 +226,16 @@ Search for Eurotax matches.
 
 ### POST /api/mapping
 
-Submit a new mapping.
+Submit a new mapping. Accepts `profile` and `vehicle_class` to normalize score server-side.
 
-### PUT /api/mapping/{mapping_id}
-
-Update an existing mapping.
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `source_code` | string | Yes | Infocar provider code |
+| `dest_code` | string | Yes | Eurotax natcode |
+| `score` | int | Yes | Raw score (normalized to 0-1 server-side using profile max) |
+| `profile` | string | No | Weight profile name (default: "default") |
+| `vehicle_class` | string | No | "CAR" or "LCV" (default: "CAR") |
+| `country` | string | No | Country code (default: "it") |
 
 ---
 
@@ -322,6 +335,7 @@ First startup loads ~80K deduplicated records from MongoDB (60-90 seconds). If i
 
 | Version | Date | Changes |
 |---------|------|---------|
+| **4.2.1** | 2026-02-10 | Mapping fixes: score normalized 0-1, strategy lowercase, vehicleType from vehicle class. Existing mapping lookup via X-Catalog API (real-time, most recent by ObjectId). Removed update mapping endpoint and MongoDB mapping lookup. |
 | **4.2.0** | 2026-02-10 | UI redesign: top 3 candidates (expand to 10), URL hash navigation, vehicle identity inline with search, OEM badge merged into OEM Code row, minimal candidate headers, "Map it" button hidden on existing mapping, transparent gap column, context strip removed |
 | **4.1.0** | 2026-02-10 | Added Model, Seats, Gears, KW, Mass scoring factors (157pt max), percentage-based confidence thresholds, spaceless model containment matching, flat weight profile, FastAPI lifespan for Docker/k8s compatibility, Dockerfile added, housekeeping (stale v3 refs, README accuracy) |
 | **4.0.0** | 2026-02-09 | OEM demoted from candidate gate to scoring field, make+model candidate selection, per-candidate OEM badges, bug fix for hidden correct variants, body type normalization overhauled to 100% coverage on both sources (was 86.1% Eurotax / 57.3% Infocar), BUS added as LCV body type |
